@@ -23,19 +23,7 @@ struct blist{//禁言名单
 } ;
 struct blist b[100] = {0};
 int bsize = 0;//禁言规模
-//初始化
-void init(){
-	serv_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	 //将套接字和IP、端口绑定
-	struct sockaddr_in serv_addr;
-	memset(&serv_addr, 0, sizeof(serv_addr));  //每个字节都用0填充
-	serv_addr.sin_family = AF_INET;  //使用IPv4地址
-	serv_addr.sin_addr.s_addr = inet_addr("172.16.40.45");  //具体的IP地址
-	serv_addr.sin_port = htons(1234);  //端口
-	bind(serv_sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
-	 //进入监听状态，等待用户发起请求
-	listen(serv_sock, 20);
-}
+
 void * nospeak(void * p){
 	char buf[100];
 //	printf("提供禁言\n");
@@ -148,7 +136,38 @@ int main(){
 	pthread_t pid;
 	int cli;
 	int nos;
-	init();
+	char buf[1024]
+//初始化
+void init(){
+	serv_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	 //将套接字和IP、端口绑定
+	struct sockaddr_in serv_addr;
+	memset(&serv_addr, 0, sizeof(serv_addr));  //每个字节都用0填充
+	serv_addr.sin_family = AF_INET;  //使用IPv4地址
+	serv_addr.sin_addr.s_addr = inet_addr("172.16.40.45");  //具体的IP地址
+	serv_addr.sin_port = htons(1234);  //端口
+	bind(serv_sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
+	 //进入监听状态，等待用户发起请求
+	listen(serv_sock, 20);
+}
+	 while (1)  
+      {  
+      
+        memset(buf,0,1024);  
+        n = read(serv_sock, buf, 1024);   
+        printf("---------------------\n");  
+      
+        if(0==connected)  
+          {  
+            printf("read:%d\n%s\n",n,buf);  
+            secWebSocketKey=computeAcceptKey(buf);    
+            shakeHand(connfd,secWebSocketKey);  
+            connected=1;  
+            continue;  //该循环只为了添加协议信息，并且只握一次手，然后跳出循环
+          }  
+  
+        data=analyData(buf,n);  
+        response(connfd,data);  
 	while(1){
 		clnt_sock = accept(serv_sock, (struct sockaddr*)&clnt_addr, &clnt_addr_size);
 		nos = pthread_create(&pid, NULL, nospeak, 0);//禁言线程
