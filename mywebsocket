@@ -130,15 +130,83 @@ void * clntthread(void * clnt_sock){
 		}
 	}
 }
+char * computeAcceptKey(const char * buf)  
+{  
+  char * clientKey;  
+  char * serverKey;   
+  char * sha1DataTemp;  
+  char * sha1Data;  
+  short temp;  
+  int i,n;  
+  const char * GUID="258EAFA5-E914-47DA-95CA-C5AB0DC85B11";  
+   
+  
+  if(!buf)  
+    {  
+      return NULL;  
+    }  
+  clientKey=(char *)malloc(LINE_MAX);  
+  memset(clientKey,0,LINE_MAX);  
+  clientKey=fetchSecKey(buf);  
+   
+  if(!clientKey)  
+    {  
+      return NULL;  
+    }  
+  
+   
+  strcat(clientKey,GUID);  
+  
+  sha1DataTemp=sha1_hash(clientKey);  
+  n=strlen(sha1DataTemp);  
+  
+  
+  sha1Data=(char *)malloc(n/2+1);  
+  memset(sha1Data,0,n/2+1);  
+   
+  for(i=0;i<n;i+=2)  
+    {        
+      sha1Data[i/2]=htoi(sha1DataTemp,i,2);      
+    }   
+  
+  serverKey = base64_encode(sha1Data, strlen(sha1Data));   
+  
+  return serverKey;  
+}  
 
+void shakeHand(int connfd,const char *serverKey)  
+{  
+  char responseHeader [RESPONSE_HEADER_LEN_MAX];  
+  
+  if(!connfd)  
+    {  
+      return;  
+    }  
+  
+  if(!serverKey)  
+    {  
+      return;  
+    }  
+  
+  memset(responseHeader,'\0',RESPONSE_HEADER_LEN_MAX);  
+  
+  sprintf(responseHeader, "HTTP/1.1 101 Switching Protocols\r\n");  
+  sprintf(responseHeader, "%sUpgrade: websocket\r\n", responseHeader);  
+  sprintf(responseHeader, "%sConnection: Upgrade\r\n", responseHeader);  
+  sprintf(responseHeader, "%sSec-WebSocket-Accept: %s\r\n\r\n", responseHeader, serverKey);  
+   
+  printf("Response Header:%s\n",responseHeader);  
+  
+  write(connfd,responseHeader,strlen(responseHeader));  
+}  
 int main(){
 	pthread_t threads;
 	pthread_t pid;
 	int cli;
 	int nos;
-	char buf[1024]
+	char buf[1024];
+	char *secWebSocketKey;  
 //初始化
-void init(){
 	serv_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	 //将套接字和IP、端口绑定
 	struct sockaddr_in serv_addr;
@@ -149,7 +217,7 @@ void init(){
 	bind(serv_sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
 	 //进入监听状态，等待用户发起请求
 	listen(serv_sock, 20);
-}
+
 	 while (1)  
       {  
       
@@ -161,13 +229,13 @@ void init(){
           {  
             printf("read:%d\n%s\n",n,buf);  
             secWebSocketKey=computeAcceptKey(buf);    
-            shakeHand(connfd,secWebSocketKey);  
+            shakeHand(serv_sock,secWebSocketKey);  
             connected=1;  
-            continue;  //该循环只为了添加协议信息，并且只握一次手，然后跳出循环
+            continue;  //该循环只为了描述协议信息，并且只握一次手，然后跳出循环
           }  
-  
+      }
         data=analyData(buf,n);  
-        response(connfd,data);  
+        response(serv_sock,data);  //这两条语句摆到多线程里面，这两句操作包含很多东西，认真思考
 	while(1){
 		clnt_sock = accept(serv_sock, (struct sockaddr*)&clnt_addr, &clnt_addr_size);
 		nos = pthread_create(&pid, NULL, nospeak, 0);//禁言线程
