@@ -79,7 +79,7 @@ int main(int argc, char *argv[])
             secWebSocketKey=computeAcceptKey(buf);    
             shakeHand(connfd,secWebSocketKey);  
             connected=1;  
-            continue;  
+            continue;  //该循环只为了添加协议信息，并且只握一次手，然后跳出循环
           }  
   
         data=analyData(buf,n);  
