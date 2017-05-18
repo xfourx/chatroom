@@ -1,0 +1,563 @@
+/* server.c */  
+#include <stdio.h>  
+#include <stdlib.h>  
+#include <string.h>  
+#include <unistd.h>  
+#include <sys/socket.h>  
+#include <netinet/in.h> 
+#include <pthread.h>
+#include <arpa/inet.h>
+#include <signal.h> 
+      
+#include "base64.h"  
+#include "sha1.h"  
+#include "intLib.h"  
+      
+      
+#define REQUEST_LEN_MAX 1024  
+#define DEFEULT_SERVER_PORT 8000  
+#define WEB_SOCKET_KEY_LEN_MAX 256  
+#define RESPONSE_HEADER_LEN_MAX 1024  
+#define LINE_MAX 256  
+      
+      
+void shakeHand(int connfd,const char *serverKey);  
+char * fetchSecKey(const char * buf);  
+char * computeAKey(const char * buf);  
+char * analyData(const char * buf,const int bufLen);  
+char * packData(const char * message,unsigned long * len);  
+void response(const int connfd,const char * message);  
+      
+int listenfd;  
+typedef void (*signal_handler)(int);
+struct sockaddr_in cliaddr;
+
+struct banc
+{
+    char banname[100];//存储服务器输入
+};
+
+struct banc ban[100] = {0};
+char notice[100];
+char bancname[100] = {0};
+int number = 0;//记录被禁言客户端的个数，数组的索引
+
+struct client
+{
+    char name[100];//存储客户昵称
+    int fds;//客户端socket描述符
+};
+
+struct client c[100] = {0};//最多记录100个链接到服务器的客户端
+int size = 0;//记录客户端的个数，数组的索引
+
+
+//获取客户端发送的KEY，正确的KEY被返回
+char * fetchSecKey(const char * buf)  
+{  
+    char *key;  
+    char *keyBegin;  
+    char *flag="Sec-WebSocket-Key: ";  
+    int i=0, bufLen=0;  
+
+    key=(char *)malloc(WEB_SOCKET_KEY_LEN_MAX); //分配一块内存空间 
+    memset(key,0, WEB_SOCKET_KEY_LEN_MAX);  
+
+    // buf为空返回0   
+    if(!buf)  
+    {  
+        return NULL;  
+    }  
+
+    //buf内不含“Sec-WebSocket-Key:”返回0；否则返回buf中flag后的内容        
+    keyBegin=strstr(buf,flag);  
+    if(!keyBegin)  
+    {  
+        return NULL;  
+    }
+
+    //将keyBegin变为与buf同长度
+    keyBegin+=strlen(flag);
+
+    bufLen=strlen(buf);
+
+    for(i=0;i<bufLen;i++)  
+    {  
+        //遇到换行符/回车结束循环        
+        if(keyBegin[i]==0x0A||keyBegin[i]==0x0D)  
+        {  
+            break;  
+        }  
+        key[i]=keyBegin[i]; 
+    }  
+    
+    //将buf内容保存到key并返回    
+    return key;  
+}  
+
+
+//处理得到服务端返回的KEY      
+char * computeAKey(const char * buf)  
+{  
+    char * clientKey;  
+    char * serverKey;   
+    char * sha1DataTemp;  
+    char * sha1Data;  
+    short temp;  
+    int i,n;  
+    //websocket规则，加在客户端KEY之后
+    const char * GUID="258EAFA5-E914-47DA-95CA-C5AB0DC85B11";  
+       
+      
+    if(!buf)  
+    {  
+    return NULL;  
+    }  
+    
+    clientKey=(char *)malloc(LINE_MAX);  
+    memset(clientKey,0,LINE_MAX);  
+    clientKey=fetchSecKey(buf);  
+    
+    if(!clientKey)  
+    {  
+    return NULL;  
+    }  
+  
+    //按规则在KEY后加入GUID对应字符串
+    strcat(clientKey,GUID);  
+    
+    //经过sha1算法处理  
+    sha1DataTemp=sha1_hash(clientKey);  
+    n=strlen(sha1DataTemp);  
+    
+    //转换16进制字符串为（10进制）整型值
+    sha1Data=(char *)malloc(n/2+1);  
+    memset(sha1Data,0,n/2+1);  
+       
+    for(i=0;i<n;i+=2)  
+    {        
+        sha1Data[i/2]=htoi(sha1DataTemp,i,2);      
+    }   
+    
+    //经过base64加密  
+    serverKey = base64_encode(sha1Data, strlen(sha1Data));   
+    //返回处理后的客户端KEY  
+    return serverKey;
+  
+}  
+
+
+//握手成功显示协议信息      
+void shakeHand(int connfd,const char *serverKey)  
+{  
+    char responseHeader [RESPONSE_HEADER_LEN_MAX];  
+  
+    if(!connfd)  
+    {  
+    return;  
+    }  
+      
+    if(!serverKey)  
+    {  
+    return;  
+    }  
+      
+    memset(responseHeader,'\0',RESPONSE_HEADER_LEN_MAX);  
+      
+    sprintf(responseHeader, "HTTP/1.1 101 Switching Protocols\r\n");  
+    sprintf(responseHeader, "%sUpgrade: websocket\r\n", responseHeader);  
+    sprintf(responseHeader, "%sConnection: Upgrade\r\n", responseHeader);  
+    sprintf(responseHeader, "%sSec-WebSocket-Accept: %s\r\n\r\n", responseHeader, serverKey);  
+       
+    printf("Response Header:%s\n",responseHeader);  
+    
+    //同时也发送给客户端  
+    send(connfd,responseHeader,strlen(responseHeader),0);  
+}  
+
+
+//分析客户端发送的帧数据
+char * analyData(const char * buf,const int bufLen)  
+{  
+    char * data;  
+    char fin, maskFlag,masks[4];  
+    char * payloadData;  
+    char temp[8];  
+    unsigned long n, payloadLen=0;  
+    unsigned short usLen=0;  
+    int i=0;   
+
+    if (bufLen < 2)   
+    {  
+        return NULL;  
+    }  
+  
+    fin = (buf[0] & 0x80) == 0x80; //1bit,fin最高位是否为1,为1表示最后一帧    
+    if (!fin)  
+    {
+        return NULL;// 超过一帧暂不处理   
+    }
+    
+    maskFlag = (buf[1] & 0x80) == 0x80; //mask最高位是否是否为1,为1表示包含掩码    
+    if (!maskFlag)  
+    {  
+    return NULL;// 不包含掩码的暂不处理  
+    }  
+  
+    payloadLen = buf[1] & 0x7F; // 数据长度  
+    if (payloadLen == 126)  
+    {        
+        memcpy(masks,buf+4, 4);        
+        payloadLen =(buf[2]&0xFF) << 8 | (buf[3]&0xFF);    
+        payloadData=(char *)malloc(payloadLen);  
+        memset(payloadData,0,payloadLen);  
+        memcpy(payloadData,buf+8,payloadLen);  
+    }  
+    else if (payloadLen == 127)  
+    {  
+        memcpy(masks,buf+10,4);    
+        for ( i = 0; i < 8; i++)  
+        {  
+            temp[i] = buf[9 - i];  
+        }   
+  
+        memcpy(&n,temp,8);    
+        payloadData=(char *)malloc(n);   
+        memset(payloadData,0,n);   
+        memcpy(payloadData,buf+14,n);//toggle error(core dumped) if data is too long.  
+        payloadLen=n;      
+    }  
+    else  
+    {     
+        memcpy(masks,buf+2,4);      
+        payloadData=(char *)malloc(payloadLen);  
+        memset(payloadData,0,payloadLen);  
+        memcpy(payloadData,buf+6,payloadLen);   
+    }  
+  
+    for (i = 0; i < payloadLen; i++)  
+    {  
+        payloadData[i] = (char)(payloadData[i] ^ masks[i % 4]);  
+    }  
+
+    printf("data(%d):%s\n",payloadLen,payloadData);  
+    //返回客户端发送的消息
+    return payloadData;  
+}  
+
+
+//打包处理服务端信息  
+char *  packData(const char * message,unsigned long * len)  
+{  
+    char * data;  
+    unsigned long n;  
+
+    n=strlen(message);  
+    if (n < 126)  
+    {  
+        data=(char *)malloc(n+2);  
+        memset(data,0,n+2);      
+        data[0] = 0x81;  
+        data[1] = n;  
+        memcpy(data+2,message,n);  
+        *len=n+2;  
+    }  
+    else if (n < 0xFFFF)  
+    {  
+        data=(char *)malloc(n+4);  
+        memset(data,0,n+4);  
+        data[0] = 0x81;  
+        data[1] = 126;  
+        data[2] = (n>>8 & 0xFF);  
+        data[3] = (n & 0xFF);  
+        memcpy(data+4,message,n);      
+        *len=n+4;  
+    }  
+    else  
+    {  
+
+    // 暂不处理超长内容    
+    *len=0;  
+    }  
+
+    printf("pack: %s \n",data);
+    return data;  
+ }  
+
+
+//发送服务端信息  
+void response(int connfd,const char * message)  
+{  
+    char * data;  
+    unsigned long n=0;  
+    int i;  
+    if(!connfd)  
+    {  
+        return;  
+    }  
+  
+    if(!data)  
+    {  
+        return;  
+    }  
+    data=packData(message,&n);   
+   
+    if(!data||n<=0)  
+    {  
+        printf("data is empty!\n");  
+        return;  
+    }   
+    
+    printf("send: %s \n",data);   
+    send(connfd,data,n,0);  
+    
+} 
+
+
+
+//禁言线程：建立黑名单，接受服务端的输入并处理
+void* ban_thread(void* j)
+{
+    while(1)
+    {
+    int fdd = *(int*)j;
+    scanf("%s",bancname);
+    strcpy(ban[number].banname,bancname);
+    printf("add to banname %s\n",ban[number].banname);
+    number++;
+	
+	//服务器输入“cleanall”时清空黑名单
+    while(strcmp(bancname,"clean") == 0)
+	{
+        for(int i=0;i<number;i++)
+			{
+            strcpy(ban[i].banname,"0");
+            printf("清空禁言用户名单!\n");
+            number--;
+            }
+	}
+    }
+}    
+
+
+
+
+
+//线程函数：用来接受客户端的消息,并把消息发给所有客户端
+//分发消息函数
+void sendMsgToAll(char* msg)
+{    
+    for(int i = 0;i<size;i++)
+	{
+        printf("sendto%d\n",c[i].fds);
+        printf("%s \n",msg);
+        response(c[i].fds,msg); 
+	}
+}
+
+
+//服务线程：判断重名、收发信息、处理禁言
+void* service_thread(void* p)
+{
+    socklen_t cliaddr_len;  
+    char buf[REQUEST_LEN_MAX];  
+    char *data;  
+    char str[INET_ADDRSTRLEN];  
+    char *secWebSKey;  
+    int i;  
+    int connected=0;//0:not connect.1:connected.
+
+    int n,m;
+    int fd = *(int*)p;//获取当前用户的connfd
+    c[size].fds = fd;//分别记录用户的connfd
+    char lerror[20] = {0};
+    char name[100]={0}; 
+    char *uname;
+	
+    memset(buf,0,REQUEST_LEN_MAX); 
+
+    //获取客户端发出的信息 
+    n = recv(fd, buf, REQUEST_LEN_MAX,0);   
+    printf("---------------------\n");  
+          
+        if(0==connected)  
+        {  
+            printf("read:%d\n%s\n",n,buf);  
+            //处理得到服务端返回的KEY 
+            secWebSKey=computeAKey(buf);    
+            //握手成功显示协议信息                  
+            shakeHand(fd,secWebSKey); 
+            //连接成功 
+            connected=1;  
+        }  
+
+	//获取当前用户名，判断重名
+    memset(name,0,100);
+    m = recv(fd, name,100,0); 
+    uname =analyData(name,m);
+	for(int i=0;i<size;i++)
+	{
+		if(strcmp(uname,c[i].name) == 0)
+		{
+			sprintf(lerror,"Error:repeat login！");
+			response(fd,lerror); 
+			close(fd);
+			return 0;                
+		}
+	}
+	strcpy(c[size].name,uname);//分别记录用户名       
+    printf("username[%d] is %s fd: %d \n",size,c[size].name,c[size].fds);
+    size++;  
+
+    //群发登陆提示给所有用户
+    char tishi[100] = {0};
+    sprintf(tishi,"%s 登录聊天室 from IP: %s ",uname,inet_ntoa(cliaddr.sin_addr));
+    sendMsgToAll(tishi);
+    printf("banname is %s \n",ban[0].banname);
+
+	//循环接受用户输入
+    while(1)
+	{
+        char buffer[REQUEST_LEN_MAX];
+        char *usertxt;
+        char cls;
+		int u;
+		//判断是否在线
+        u = recv(fd,buffer,REQUEST_LEN_MAX,0);
+        cls = (buffer[0] & 0x08) == 0x08;
+        if(cls == 1)
+        {
+            //1,表示客户端断开链接，有用户退出
+            for(int i=0;i<size;i++)
+            {
+                if(c[i].fds == fd)
+                {
+                    strcpy(uname,c[i].name);
+                    c[i].fds = c[size-1].fds;
+                    strcpy(c[i].name,c[size-1].name);
+                    //用最后一个有效的数组元素，覆盖当前没用的数组元素
+                }
+            }
+			size--;
+			
+			//群发退出通知
+            char msg[100] = {0};
+            sprintf(msg,"%s 离开聊天室,再见!",uname);
+            sendMsgToAll(msg);
+			
+			//客户端退出了，结束服务线程
+            close(fd);
+			pthread_exit(0);
+            return 0;
+        }
+
+		//在线用户
+		//判断禁言
+        for(int j=0;j<number;j++)
+        {
+            if(strcmp(uname,ban[j].banname) == 0)
+            {
+                char notice[20];
+                sprintf(notice, "您被禁止发言!");
+                response(fd,notice);
+                memset(buffer,0,100);//若被禁言，则发送空消息
+                break;       
+            }
+        } 
+        
+        //群发用户消息
+        if(strcmp(buffer,"") == 0)       
+        {
+        continue;
+        }
+        else
+        {
+        char tmess[200] ={0};
+        usertxt = analyData(buffer,u);
+        sprintf(tmess,"%s : %s",uname,usertxt);
+        sendMsgToAll(tmess);
+        }
+	}
+
+}
+
+
+int main(int argc, char *argv[])  
+{  
+    struct sockaddr_in servaddr;  
+    socklen_t cliaddr_len;  
+    char buf[REQUEST_LEN_MAX];  
+    char *data;  
+    char str[INET_ADDRSTRLEN];  
+    int i,n;  
+    int connected=0;//0:not connect.1:connected.
+  
+    //默认端口8000 若有输入则改为输入值
+    int port= DEFEULT_SERVER_PORT;  
+  
+    if(argc>1)  
+    {  
+        port=atoi(argv[1]);  
+    }  
+    if(port<=0||port>0xFFFF)  
+    {  
+        printf("Port(%d) is out of range(1-%d)\n",port,0xFFFF);  
+        return;  
+    }  
+
+    listenfd = socket(AF_INET, SOCK_STREAM,IPPROTO_TCP);  
+      
+    bzero(&servaddr, sizeof(servaddr));  
+    servaddr.sin_family = AF_INET;  
+    servaddr.sin_addr.s_addr = htonl(INADDR_ANY);  
+    servaddr.sin_port = htons(port);  
+      
+    bind(listenfd, (struct sockaddr *)&servaddr, sizeof(servaddr));  
+      
+    listen(listenfd, 20);  
+
+    printf("Listen %d\nAccepting connections ...\n",port);  
+    while(1)
+    {    
+        int connfd;
+        cliaddr_len = sizeof(cliaddr);  
+        connfd = accept(listenfd, (struct sockaddr *)&cliaddr, &cliaddr_len); 
+        if(listenfd == -1)
+		{
+            printf("客户端链接出错\n");
+            continue;//继续循环，处理连接
+		}
+        
+		//如果客户端成功连接上
+        //启动线程
+		pthread_t banpid;
+        pthread_t pid;
+		
+		int ret_ban = pthread_create(&banpid,0,ban_thread,&connfd);
+		if (ret_ban != 0 )
+		{
+			printf("启动禁言线程失败!\n");
+			exit(1);
+		}
+        
+		int ret_serv = pthread_create(&pid,0,service_thread,&connfd);
+		if (ret_serv != 0 )
+		{
+			printf("启动服务线程失败!\n");
+			exit(1);
+		}
+	}
+ 
+}
+
+
+void signal_handler_close(int signum)
+{
+	//关闭服务器的socket
+    close(listenfd);
+    printf("\n服务器已经关闭!\n");
+    exit(0);
+}
+ 
+
+
