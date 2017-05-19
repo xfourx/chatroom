@@ -10,6 +10,13 @@
 #include"base64.h"
 #include "sha1.h"  
 #include "intLib.h" 
+
+#define REQUEST_LEN_MAX 1024  
+#define DEFEULT_SERVER_PORT 8000  
+#define WEB_SOCKET_KEY_LEN_MAX 256  
+#define RESPONSE_HEADER_LEN_MAX 1024  
+#define LINE_MAX 256  
+
 int listenfd;  
 typedef void (*signal_handler)(int);
 struct sockaddr_in cliaddr;
@@ -22,7 +29,7 @@ struct banc
 struct banc ban[100] = {0};
 char notice[100];
 char bancname[100] = {0};
-int number = 0;//记录被禁言客户端的个数，数组的索引
+int number = 0;//记录被禁言客户端的个数
 
 struct client
 {
@@ -74,8 +81,6 @@ char * fetchSecKey(const char * buf)
     //将buf内容保存到key并返回    
     return key;  
 }  
-
-
 
 char * analyData(const char * buf,const int bufLen)  
 {  
