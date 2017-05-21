@@ -296,15 +296,15 @@ void response(int connfd,const char * message)
         return;  
     }  
   
-    if(!data)  
+    if(!data)               //这个data的值从哪来？？？？？？？？？？？？？？？？？？
     {  
         return;  
     }  
     data=packData(message,&n);   
    
-    if(!data||n<=0)  
+    if(!data||n<=0)         //n的值并没有改变为什么作为判断条件？？？？？？？？？？？？？？？？？？？？
     {  
-        printf("data is empty!\n");  
+        printf("data is empty!\n");         
         return;  
     }   
     
@@ -353,7 +353,7 @@ void* ban_thread(void* j)
 		 for(int a=i+1;strcmp(ban[a].banname,"0")!=0;a++)
 		    {
 		     strcpy(ban[a].banname,ban[a+1].banname);
-                    }		 
+                    }		 //因为size传递很麻烦，干脆把用户名移位，语句方便但增加系统负担
 		}
 	       }
 	    }
@@ -390,7 +390,7 @@ void* service_thread(void* p)
 
     int n,m;
     int fd = *(int*)p;//获取当前用户的connfd
-    c[size].fds = fd;//分别记录用户的connfd
+    c[size].fds = fd;//分别记录用户的connfd                        //这个size谁传给他的？？？？？？？？？？也没有命名啊
     char lerror[20] = {0};
     char name[100]={0}; 
     char *uname;
@@ -421,7 +421,7 @@ void* service_thread(void* p)
 		if(strcmp(uname,c[i].name) == 0)
 		{
 			sprintf(lerror,"Error:repeat login！");
-			response(fd,lerror); 
+			response(fd,lerror);                               //传一个空的信息？？？？？？？？？？？？？
 			close(fd);
 			return 0;                
 		}
@@ -445,7 +445,7 @@ void* service_thread(void* p)
 		int u;
 		//判断是否在线
         u = recv(fd,buffer,REQUEST_LEN_MAX,0);
-        cls = (buffer[0] & 0x08) == 0x08;
+        cls = (buffer[0] & 0x08) == 0x08;   //&按位与，后与0x08二进制比较，判断
         if(cls == 1)
         {
             //1,表示客户端断开链接，有用户退出
@@ -487,9 +487,9 @@ void* service_thread(void* p)
         } 
         
         //群发用户消息
-        if(strcmp(buffer,"") == 0)       
+        if(strcmp(buffer,"") == 0)        //这个判断功能是什么？？？？？？？？？？？？？？？？？？？？？？？
         {
-        continue;
+        continue;                         
         }
         else
         {
@@ -546,7 +546,7 @@ int main(int argc, char *argv[])
         if(listenfd == -1)
 		{
             printf("客户端链接出错\n");
-            continue;//继续循环，处理连接
+            continue;//跳出本次循环，继续下一次循环，处理连接
 		}
         
 		//如果客户端成功连接上
@@ -572,7 +572,7 @@ int main(int argc, char *argv[])
 }
 
 
-void signal_handler_close(int signum)
+void signal_handler_close(int signum)         // 这个函数有用到？？？？？？？？？？？？？？？？？？？？？？？？？
 {
 	//关闭服务器的socket
     close(listenfd);
