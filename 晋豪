@@ -318,6 +318,7 @@ void response(int connfd,const char * message)
 //禁言线程：建立黑名单，接受服务端的输入并处理
 void* ban_thread(void* j)
 {
+    char commendban[100]={0};
     while(1)
     {
     int fdd = *(int*)j;//得到被禁言用户的套接字
