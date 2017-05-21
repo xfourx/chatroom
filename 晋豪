@@ -320,14 +320,17 @@ void* ban_thread(void* j)
 {
     while(1)
     {
-    int fdd = *(int*)j;
-    scanf("%s",bancname);
-    strcpy(ban[number].banname,bancname);
-    printf("add to banname %s\n",ban[number].banname);
-    number++;
-	
+    int fdd = *(int*)j;//得到被禁言用户的套接字
+    if（scanf（“%s”，commendban）==“shutup”）
+      {
+       printf（“输入禁言用户名!\n”）；
+       scanf("%s",bancname);
+       strcpy(ban[number].banname,bancname);
+       printf("add to banname %s\n",ban[number].banname);
+       number++;
+      }
 	//服务器输入“cleanall”时清空黑名单
-    while(strcmp(bancname,"clean") == 0)
+     else if(strcmp(commendban,"cleanall") == 0)
 	{
         for(int i=0;i<number;i++)
 			{
@@ -336,6 +339,23 @@ void* ban_thread(void* j)
             number--;
             }
 	}
+	//服务器输入“clean”时清空特定用户
+     else if(strcmp(commendban,"clean")==0)
+            {
+	     printf（“输入解言用户名!\n”）;
+             scanf("%s",bancname);
+	    for（int i=0;i<number;i++）
+	       {
+	       if(strcmp(ban[i].banname,bancname)==0)
+	        {
+		 strcpy(ban[i].banname,"0");
+		 for(int a=i+1;strcmp(ban[a].banname,"0")!=0;a++)
+		    {
+		     strcpy(ban[a].banname,ban[a+1].banname);
+                    }		 
+		}
+	       }
+	    }
     }
 }    
 
