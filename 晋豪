@@ -40,7 +40,7 @@ struct banc
 struct banc ban[100] = {0};
 char notice[100];
 char bancname[100] = {0};
-int number = 0;//记录被禁言客户端的个数，数组的索引
+int number = 0;//记录被禁言客户端的个数
 
 struct client
 {
@@ -315,7 +315,7 @@ void response(int connfd,const char * message)
 
 
 
-//禁言线程：建立黑名单，接受服务端的输入并处理
+//禁言线程，建立黑名单
 void* ban_thread(void* j)
 {
     char commendban[100]={0};
@@ -364,8 +364,7 @@ void* ban_thread(void* j)
 
 
 
-//线程函数：用来接受客户端的消息,并把消息发给所有客户端
-//分发消息函数
+//线程函数：接受客户端的消息,并把消息发给所有客户端
 void sendMsgToAll(char* msg)
 {    
     for(int i = 0;i<size;i++)
