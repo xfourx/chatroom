@@ -370,7 +370,7 @@ void sendMsgToAll(char* msg)
 {    
     for(int i = 0;i<size;i++)
 	{
-        printf("sendto%d\n",c[i].fds);
+        printf("sendto%d\n",c[i].fds);    //c[i]全局结构体，前面有
         printf("%s \n",msg);
         response(c[i].fds,msg); 
 	}
@@ -390,7 +390,7 @@ void* service_thread(void* p)
 
     int n,m;
     int fd = *(int*)p;//获取当前用户的connfd
-    c[size].fds = fd;//分别记录用户的connfd                        //这个size谁传给他的？？？？？？？？？？也没有命名啊
+    c[size].fds = fd;//分别记录用户的connfd                        //size一开始值为0，第一个用户出现后，后面自增
     char lerror[20] = {0};
     char name[100]={0}; 
     char *uname;
@@ -421,7 +421,7 @@ void* service_thread(void* p)
 		if(strcmp(uname,c[i].name) == 0)
 		{
 			sprintf(lerror,"Error:repeat login！");
-			response(fd,lerror);                               //传一个空的信息？？？？？？？？？？？？？
+			response(fd,lerror);                               //这里与一个空数组合并，为的是符合response格式，传递数组
 			close(fd);
 			return 0;                
 		}
@@ -487,7 +487,7 @@ void* service_thread(void* p)
         } 
         
         //群发用户消息
-        if(strcmp(buffer,"") == 0)        //这个判断功能是什么？？？？？？？？？？？？？？？？？？？？？？？
+        if(strcmp(buffer,"") == 0)        //判断buffer作为接受消息所存的数组，是否为空，就是有没有消息，没消息不用群发，跳出循环
         {
         continue;                         
         }
