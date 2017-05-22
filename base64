@@ -1,231 +1,149 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <io.h>
-#include <fcntl.h>
-#include <stdbool.h>
-
-#ifndef MAX_PATH
-#define MAX_PATH 256
-#endif
-
-const char * base64char = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-char * base64_encode( const unsigned char * bindata, char * base64, int binlength )
-{
-    int i, j;
-    unsigned char current;
-
-    for ( i = 0, j = 0 ; i < binlength ; i += 3 )
-    {
-        current = (bindata[i] >> 2) ;
-        current &= (unsigned char)0x3F;
-        base64[j++] = base64char[(int)current];
-
-        current = ( (unsigned char)(bindata[i] << 4 ) ) & ( (unsigned char)0x30 ) ;
-        if ( i + 1 >= binlength )
-        {
-            base64[j++] = base64char[(int)current];
-            base64[j++] = '=';
-            base64[j++] = '=';
-            break;
-        }
-        current |= ( (unsigned char)(bindata[i+1] >> 4) ) & ( (unsigned char) 0x0F );
-        base64[j++] = base64char[(int)current];
-
-        current = ( (unsigned char)(bindata[i+1] << 2) ) & ( (unsigned char)0x3C ) ;
-        if ( i + 2 >= binlength )
-        {
-            base64[j++] = base64char[(int)current];
-            base64[j++] = '=';
-            break;
-        }
-        current |= ( (unsigned char)(bindata[i+2] >> 6) ) & ( (unsigned char) 0x03 );
-        base64[j++] = base64char[(int)current];
-
-        current = ( (unsigned char)bindata[i+2] ) & ( (unsigned char)0x3F ) ;
-        base64[j++] = base64char[(int)current];
-    }
-    base64[j] = '\0';
-    return base64;
-}
-
-int base64_decode( const char * base64, unsigned char * bindata )
-{
-    int i, j;
-    unsigned char k;
-    unsigned char temp[4];
-    for ( i = 0, j = 0; base64[i] != '\0' ; i += 4 )
-    {
-        memset( temp, 0xFF, sizeof(temp) );
-        for ( k = 0 ; k < 64 ; k ++ )
-        {
-            if ( base64char[k] == base64[i] )
-                temp[0]= k;
-        }
-        for ( k = 0 ; k < 64 ; k ++ )
-        {
-            if ( base64char[k] == base64[i+1] )
-                temp[1]= k;
-        }
-        for ( k = 0 ; k < 64 ; k ++ )
-        {
-            if ( base64char[k] == base64[i+2] )
-                temp[2]= k;
-        }
-        for ( k = 0 ; k < 64 ; k ++ )
-        {
-            if ( base64char[k] == base64[i+3] )
-                temp[3]= k;
-        }
-
-        bindata[j++] = ((unsigned char)(((unsigned char)(temp[0] << 2))&0xFC)) |
-                ((unsigned char)((unsigned char)(temp[1]>>4)&0x03));
-        if ( base64[i+2] == '=' )
-            break;
-
-        bindata[j++] = ((unsigned char)(((unsigned char)(temp[1] << 4))&0xF0)) |
-                ((unsigned char)((unsigned char)(temp[2]>>2)&0x0F));
-        if ( base64[i+3] == '=' )
-            break;
-
-        bindata[j++] = ((unsigned char)(((unsigned char)(temp[2] << 6))&0xF0)) |
-                ((unsigned char)(temp[3]&0x3F));
-    }
-    return j;
-}
-
-void encode(FILE * fp_in, FILE * fp_out)
-{
-    unsigned char bindata[2050];
-    char base64[4096];
-    size_t bytes;
-    while ( !feof( fp_in ) )
-    {
-        bytes = fread( bindata, 1, 2049, fp_in );
-        base64_encode( bindata, base64, bytes );
-        fprintf( fp_out, "%s", base64 );
-    }
-}
-
-void decode(FILE * fp_in, FILE * fp_out)
-{
-    int i;
-    unsigned char bindata[2050];
-    char base64[4096];
-    size_t bytes;
-    while ( !feof( fp_in ) )
-    {
-        for ( i = 0 ; i < 2048 ; i ++ )
-        {
-            base64[i] = fgetc(fp_in);
-            if ( base64[i] == EOF )
-                break;
-            else if ( base64[i] == '\n' || base64[i] == '\r' )
-                i --;
-        }
-        bytes = base64_decode( base64, bindata );
-        fwrite( bindata, bytes, 1, fp_out );
-    }
-}
-
-void help(const char * filepath)
-{
-    fprintf( stderr, "Usage: %s [-d] [input_filename] [-o output_filepath]\n", filepath );
-    fprintf( stderr, "\t-d\tdecode data\n" );
-    fprintf( stderr, "\t-o\toutput filepath\n\n" );
-}
-
-int main(int argc, char * argv[])
-{
-    FILE * fp_input = NULL;
-    FILE * fp_output = NULL;
-    bool isencode = true;
-    bool needHelp = false;
-    int opt = 0;
-    char input_filename[MAX_PATH] = "";
-    char output_filename[MAX_PATH] = "";
-
-    opterr = 0;
-    while ( (opt = getopt(argc, argv, "hdo:")) != -1 )
-    {
-        switch(opt)
-        {
-        case 'd':
-            isencode = false;
-            break;
-        case 'o':
-            strncpy(output_filename, optarg, sizeof(output_filename));
-            output_filename[sizeof(output_filename)-1] = '\0';
-            break;
-        case 'h':
-            needHelp = true;
-            break;
-        default:
-            fprintf(stderr, "%s: invalid option -- %c\n", argv[0], optopt);
-            needHelp = true;
-            break;
-        }
-    }
-    if ( optind < argc )
-    {
-        strncpy(input_filename, argv[optind], sizeof(input_filename));
-        input_filename[sizeof(input_filename)-1] = '\0';
-    }
-
-    if (needHelp)
-    {
-        help(argv[0]);
-        return EXIT_FAILURE;
-    }
-
-    if ( !strcmp(input_filename, "") )
-    {
-        fp_input = stdin;
-        if (isencode)
-            _setmode( _fileno(stdin), _O_BINARY );
-    }
-    else
-    {
-        if (isencode)
-            fp_input = fopen(input_filename, "rb");
-        else
-            fp_input = fopen(input_filename, "r");
-    }
-    if ( fp_input == NULL )
-    {
-        fprintf(stderr, "Input file open error\n");
-        return EXIT_FAILURE;
-    }
-
-    if ( !strcmp(output_filename, "") )
-    {
-        fp_output = stdout;
-        if (!isencode)
-            _setmode( _fileno(stdout), _O_BINARY );
-    }
-    else
-    {
-        if (isencode)
-            fp_output = fopen(output_filename, "w");
-        else
-            fp_output = fopen(output_filename, "wb");
-    }
-    if ( fp_output == NULL )
-    {
-        fclose(fp_input);
-        fp_input = NULL;
-        fprintf(stderr, "Output file open error\n");
-        return EXIT_FAILURE;
-    }
-
-    if (isencode)
-        encode(fp_input, fp_output);
-    else
-        decode(fp_input, fp_output);
-    fclose(fp_input);
-    fclose(fp_output);
-    fp_input = fp_output = NULL;
-    return EXIT_SUCCESS;
-}
+#include <stdio.h>  
+#include <string.h>  
+#include <stdlib.h>  
+  
+const char _Base[]={"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="};  
+  
+static union  
+{  
+    struct    
+    {  
+        unsigned long a:6;  
+        unsigned long b:6;  
+        unsigned long c:6;  
+        unsigned long d:6;  
+    }Sdata;  
+    unsigned char c[3];  
+}Udata;  
+  
+char * Encbase64(char * orgdata,unsigned long orglen,unsigned long *newlen);  
+  
+char * Decbase64(char * orgdata,unsigned long orglen);  
+  
+int main(int argc,char *agv[])  
+{  
+    unsigned long nlen;  
+      
+    printf("%s\n",Encbase64("i love travel",strlen("i love travel"),&nlen));  
+      
+    printf("%s\n",Decbase64("aSBsb3ZlIHRyYXZlbA==",strlen("aSBsb3ZlIHRyYXZlbA==")));  
+    return 0;  
+}  
+  
+char * Encbase64(char * orgdata,unsigned long orglen,unsigned long *newlen)  
+{  
+    char *p=NULL,*ret=NULL;  
+    int tlen=0;  
+    if (orgdata==NULL|| orglen==0)  
+        return NULL ;  
+    tlen=orglen/3;  
+    if(tlen%3!=0) tlen++;  
+    tlen=tlen*4;  
+    *newlen=tlen;  
+    if ((ret=(char *)malloc(tlen+1))==NULL)  
+        return NULL;  
+    memset(ret,0,tlen+1);  
+    p=orgdata;tlen=orglen;  
+  
+    int i=0,j=0;  
+    while(tlen>0)  
+    {  
+        Udata.c[0]=Udata.c[1]=Udata.c[2]=0;  
+        for (i=0;i<3;i++)  
+        {  
+            if (tlen<1) break;  
+            Udata.c[i]=(char)*p;  
+            tlen--;  
+            p++;  
+        }  
+        if (i==0) break;  
+        switch (i)  
+        {  
+            case 1:  
+                /*ret[j++]=_Base[Udata.Sdata.d];  
+                ret[j++]=_Base[Udata.Sdata.c];  
+                ret[j++]=_Base[64];  
+                ret[j++]=_Base[64];*/  
+                ret[j++]=_Base[Udata.c[0]>>2];  
+                ret[j++]=_Base[((Udata.c[0]&0x03)<<4)|((Udata.c[1]&0xf0)>>4)];  
+                ret[j++]=_Base[64];  
+                ret[j++]=_Base[64];  
+                break;  
+            case 2:  
+                /*ret[j++]=_Base[Udata.Sdata.d];  
+                ret[j++]=_Base[Udata.Sdata.c];  
+                ret[j++]=_Base[Udata.Sdata.b];  
+                ret[j++]=_Base[64];*/  
+                ret[j++]=_Base[Udata.c[0]>>2];  
+                ret[j++]=_Base[((Udata.c[0]&0x03)<<4)|((Udata.c[1]&0xf0)>>4)];  
+                ret[j++]=_Base[((Udata.c[1]&0x0f)<<2)|((Udata.c[2]&0xc0)>>6)];  
+                ret[j++]=_Base[64];  
+                break;  
+            case 3:  
+                /*ret[j++]=_Base[Udata.Sdata.d];  
+                ret[j++]=_Base[Udata.Sdata.c];  
+                ret[j++]=_Base[Udata.Sdata.b];  
+                ret[j++]=_Base[Udata.Sdata.a];*/  
+                ret[j++]=_Base[Udata.c[0]>>2];  
+                ret[j++]=_Base[((Udata.c[0]&0x03)<<4)|((Udata.c[1]&0xf0)>>4)];  
+                ret[j++]=_Base[((Udata.c[1]&0x0f)<<2)|((Udata.c[2]&0xc0)>>6)];  
+                ret[j++]=_Base[Udata.c[2]&0x3f];  
+                break;  
+            default:  
+                break;  
+        }  
+    }  
+    ret[j]='\0';  
+    return ret;  
+}  
+  
+char * Decbase64(char * orgdata,unsigned long orglen)  
+{  
+    char *p,*ret;  
+    int len;  
+    char ch[4]={0};  
+    char *pos[4];  
+    int  offset[4];  
+    if (orgdata==NULL || orglen==0)  
+    {  
+        return NULL;  
+    }  
+    len=orglen*3/4;  
+    if ((ret=(char *)malloc(len+1))==NULL)  
+    {  
+        return NULL;  
+    }  
+    p=orgdata;  
+    len=orglen;  
+    int j=0;  
+      
+    while(len>0)  
+    {  
+        int i=0;  
+        while(i<4)  
+        {  
+            if (len>0)  
+            {  
+                ch[i]=*p;  
+                p++;  
+                len--;  
+                if ((pos[i]=(char *)strchr(_Base,ch[i]))==NULL)  
+                {  
+                    return NULL;  
+                }  
+                offset[i]=pos[i]-_Base;  
+                  
+            }  
+            i++;  
+        }  
+        if (ch[0]=='='||ch[1]=='='||(ch[2]=='='&&ch[3]!='='))  
+        {  
+            return NULL;  
+        }  
+        ret[j++]=(unsigned char)(offset[0]<<2|offset[1]>>4);  
+        ret[j++]=offset[2]==64?'\0':(unsigned char)(offset[1]<<4|offset[2]>>2);  
+        ret[j++]=offset[3]==64?'\0':(unsigned char)((offset[2]<<6&0xc0)|offset[3]);  
+    }  
+    ret[j]='\0';  
+    return ret;  
+}  
